@@ -7,7 +7,8 @@
 // сама папка никуда не копируется, она и так портативная
 namespace install {
 
-inline const char* kVersion = "1.0";
+// отсюда же сборщик берет номер для имени папки, так что менять версию надо тут
+inline const char* kVersion = "1.0.0";
 inline const wchar_t* kDisplayName = L"Vinyl";
 
 bool isRegistered();

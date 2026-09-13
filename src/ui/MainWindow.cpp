@@ -496,9 +496,10 @@ void MainWindow::drawToast(D2D1_SIZE_F size) {
 
     float width = painter_.measure(message, Font::BodyLarge, size.width).width + painter_.dp(40.f);
     float height = painter_.dp(44.f);
+    // держим сообщение сверху по центру: внизу на главной лежит карточка сервера и они налезают
     float cx = sidebarW() + (size.width - sidebarW()) / 2.f;
-    D2D1_RECT_F r = D2D1::RectF(cx - width / 2, size.height - painter_.dp(38.f) - height,
-                                cx + width / 2, size.height - painter_.dp(38.f));
+    float top = titleBarH() + painter_.dp(12.f);
+    D2D1_RECT_F r = D2D1::RectF(cx - width / 2, top, cx + width / 2, top + height);
 
     painter_.round(r, height / 2, theme::surfaceHigh);
     painter_.roundBorder(r, height / 2, theme::strokeStrong());

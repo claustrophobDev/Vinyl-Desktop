@@ -70,9 +70,16 @@ add_executable(vinyl WIN32
     res/app.rc
 )
 
+# Уровень прав задан в своем манифесте (res/app.manifest.in), и он должен быть единственным.
+# Линковщик по умолчанию подмешивает еще и свой кусок с level='asInvoker'. Пока мы сами просили
+# asInvoker, куски совпадали и все собиралось, а на requireAdministrator mt.exe падал с
+# c1010001 "Values of attribute level not equal". /MANIFESTUAC:NO выключает кусок от линковщика.
+# Писать уровень прямо в /MANIFESTUAC нельзя: cmake -E vs_link_exe корежит кавычки внутри
+# аргумента и получается битый xml (c1010070).
 target_link_options(vinyl PRIVATE
     "/MANIFEST:EMBED"
     "/MANIFESTINPUT:${CMAKE_CURRENT_BINARY_DIR}/app.manifest"
+    "/MANIFESTUAC:NO"
 )
 
 target_link_libraries(vinyl PRIVATE
