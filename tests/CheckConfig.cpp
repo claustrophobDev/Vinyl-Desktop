@@ -38,7 +38,7 @@ const Sample kSamples[] = {
       "vless://11111111-2222-3333-4444-555555555555@example.com:443"
       "?type=grpc&security=tls&serviceName=grpcvinyl&fp=firefox#Finland" },
 
-    // base64 от {"v":"2","ps":"Tokyo","add":"example.com","port":"443","id":"1111...","aid":"0","net":"ws","host":"cdn.example.com","path":"/vm","tls":"tls"}
+    // у vmess внутри base64 лежит обычный json
     { "vmess-ws",
       "vmess://eyJ2IjoiMiIsInBzIjoiVG9reW8iLCJhZGQiOiJleGFtcGxlLmNvbSIsInBvcnQiOiI0NDMiLCJpZCI6IjExMTExMTExLTIyMjItMzMzMy00NDQ0LTU1NTU1NTU1NTU1NSIsImFpZCI6IjAiLCJuZXQiOiJ3cyIsImhvc3QiOiJjZG4uZXhhbXBsZS5jb20iLCJwYXRoIjoiL3ZtIiwidGxzIjoidGxzIn0=" },
 

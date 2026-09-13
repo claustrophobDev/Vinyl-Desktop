@@ -175,10 +175,14 @@ void flagAvatar(Ui& ui, D2D1_POINT_2F center, float radius, const std::string& f
         return;
     }
 
+    // страну не угадали: код буквами, а если и его нет - глобус
     p.round(box, p.dp(4.f), theme::surfaceHigh);
     std::wstring letters(code.begin(), code.end());
-    p.text(letters.empty() ? L"?" : letters, Font::LabelMedium, box,
-           theme::textSecond, Align::Center, VAlign::Middle);
+    if (letters.empty()) {
+        p.text(glyph::globe, Font::Icon, box, theme::textMuted, Align::Center, VAlign::Middle);
+    } else {
+        p.text(letters, Font::LabelMedium, box, theme::textSecond, Align::Center, VAlign::Middle);
+    }
 }
 
 namespace {
