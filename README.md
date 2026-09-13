@@ -43,11 +43,28 @@ cmake --build build
 cmake -S . -B build -DVINYL_REQUIRE_ADMIN=OFF
 ```
 
-Собрать готовую портативную папку:
+Собрать готовую к раздаче версию:
 
 ```bash
 powershell -ExecutionPolicy Bypass -File tools\pack.ps1
 ```
+
+Скрипт соберёт релиз (обязательно с правами администратора, иначе не поднимется tun-интерфейс),
+разложит всё по местам и заодно сделает архив:
+
+```
+outputs\
+  Vinyl-1.0.0\
+    vinyl.exe
+    uninstall.exe
+    Как пользоваться.txt
+    core\      sing-box.exe и wintun.dll
+    data\      сюда лягут настройки и логи
+  Vinyl-1.0.0.zip
+```
+
+Версия берётся из `kVersion` в `src/app/Install.h`, так что имя папки меняется вместе с ней.
+Архив можно сразу заливать: распаковал и запустил, искать зависимости не надо.
 
 ## Как устроено
 
