@@ -32,6 +32,12 @@ std::string headerValue(HINTERNET request, const wchar_t* name) {
 Response get(const std::string& url) {
     Response out;
     std::wstring wide = text::wide(text::trim(url));
+
+    // хвост после решетки это название подписки, серверу он не нужен.
+    // если его не отрезать, он уезжает прямо в путь запроса и панель отвечает 404
+    size_t hash = wide.find(L'#');
+    if (hash != std::wstring::npos) wide = wide.substr(0, hash);
+
     if (wide.empty()) {
         out.error = "Пустая ссылка";
         return out;
@@ -41,10 +47,14 @@ Response get(const std::string& url) {
     parts.dwStructSize = sizeof(parts);
     wchar_t host[256] = {};
     wchar_t path[2048] = {};
+    wchar_t extra[2048] = {};
     parts.lpszHostName = host;
     parts.dwHostNameLength = (DWORD)(sizeof(host) / sizeof(host[0]));
     parts.lpszUrlPath = path;
     parts.dwUrlPathLength = (DWORD)(sizeof(path) / sizeof(path[0]));
+    // без своего буфера строка запроса просто теряется, а в подписках сплошь и рядом ?token=...
+    parts.lpszExtraInfo = extra;
+    parts.dwExtraInfoLength = (DWORD)(sizeof(extra) / sizeof(extra[0]));
 
     if (!WinHttpCrackUrl(wide.c_str(), 0, 0, &parts)) {
         out.error = "Не получилось разобрать ссылку";
@@ -60,6 +70,11 @@ Response get(const std::string& url) {
 
     WinHttpSetTimeouts(session, 15000, 15000, 20000, 20000);
 
+    // панели любят перекидывать на другой адрес, иногда с https на http.
+    // по умолчанию winhttp такие переходы не делает, а телефон их отрабатывал руками
+    DWORD redirect = WINHTTP_OPTION_REDIRECT_POLICY_ALWAYS;
+    WinHttpSetOption(session, WINHTTP_OPTION_REDIRECT_POLICY, &redirect, sizeof(redirect));
+
     HINTERNET connection = WinHttpConnect(session, host, parts.nPort, 0);
     if (!connection) {
         WinHttpCloseHandle(session);
@@ -67,9 +82,16 @@ Response get(const std::string& url) {
         return out;
     }
 
+    // путь и строка запроса идут вместе, иначе сервер не поймет какую подписку отдавать
+    std::wstring target = path;
+    target += extra;
+
+    // winhttp по умолчанию не шлет Accept, а некоторые панели без него отдают html вместо списка
+    static const wchar_t* kAccept[] = { L"*/*", nullptr };
+
     DWORD flags = (parts.nScheme == INTERNET_SCHEME_HTTPS) ? WINHTTP_FLAG_SECURE : 0;
-    HINTERNET request = WinHttpOpenRequest(connection, L"GET", path, nullptr,
-                                           WINHTTP_NO_REFERER, WINHTTP_DEFAULT_ACCEPT_TYPES, flags);
+    HINTERNET request = WinHttpOpenRequest(connection, L"GET", target.c_str(), nullptr,
+                                           WINHTTP_NO_REFERER, kAccept, flags);
     if (!request) {
         WinHttpCloseHandle(connection);
         WinHttpCloseHandle(session);

@@ -220,7 +220,9 @@ void AppModel::addFromText(const std::string& text) {
             Subscription sub;
             sub.id = id;
             sub.url = url;
-            sub.name = "Подписка";
+            // после решетки панели обычно пишут название подписки, до первого обновления берем его
+            std::string title = ::text::trim(::text::urlDecode(::text::after(url, "#", "")));
+            sub.name = title.empty() ? "Подписка" : title;
             state_.subscriptions.push_back(sub);
             saveLocked();
         }

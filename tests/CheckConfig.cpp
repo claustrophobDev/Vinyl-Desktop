@@ -12,6 +12,7 @@
 #include "core/LinkParser.h"
 #include "core/SingBoxConfig.h"
 #include "data/Models.h"
+#include "net/Http.h"
 
 namespace {
 
@@ -105,9 +106,44 @@ int dump(const std::string& dir, const std::string& name, const std::string& lin
 
 } // namespace
 
+// проверка подписки живьем: что ответил сервер и сколько серверов удалось разобрать
+static int checkSubscription(const std::string& url) {
+    printf("тянем подписку...\n");
+    http::Response response = http::get(url);
+    printf("  код ответа:   %d\n", response.status);
+    if (!response.error.empty()) printf("  ошибка:       %s\n", response.error.c_str());
+    printf("  тело:         %zu байт\n", response.body.size());
+
+    std::string head = response.body.substr(0, 90);
+    for (char& c : head) {
+        if (c == '\r' || c == '\n') c = ' ';
+    }
+    printf("  начало тела:  %s\n", head.c_str());
+
+    const std::string& title = response.headers["profile-title"];
+    const std::string& info = response.headers["subscription-userinfo"];
+    if (!title.empty()) printf("  profile-title: %s\n", title.c_str());
+    if (!info.empty()) printf("  трафик:        %s\n", info.c_str());
+
+    if (!response.ok) return 1;
+
+    std::vector<Server> servers = LinkParser::parseSubscription(response.body, "test");
+    printf("  разобрано серверов: %zu\n", servers.size());
+    size_t show = servers.size() < 5 ? servers.size() : 5;
+    for (size_t i = 0; i < show; i++) {
+        const Server& s = servers[i];
+        printf("    %s %-28s %-12s %s:%d\n", s.flag.c_str(), s.name.c_str(),
+               protocolLabel(s.protocol), s.host.c_str(), s.port);
+    }
+    return servers.empty() ? 1 : 0;
+}
+
 int main(int argc, char** argv) {
+    if (argc >= 3 && std::string(argv[1]) == "--sub") {
+        return checkSubscription(argv[2]);
+    }
     if (argc < 2) {
-        printf("укажи папку куда складывать конфиги\n");
+        printf("укажи папку куда складывать конфиги, или --sub <ссылка на подписку>\n");
         return 2;
     }
     std::string dir = argv[1];
