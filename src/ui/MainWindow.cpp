@@ -83,6 +83,7 @@ bool MainWindow::create(HINSTANCE inst) {
     }
 
     model_.load();
+    refreshCache();
     HWND target = hwnd_;
     model_.onChanged([target] { PostMessageW(target, WM_VINYL_MODEL, 0, 0); });
     model_.onMessage([this, target](const std::string& message) {
@@ -110,6 +111,32 @@ void MainWindow::updateDpi() {
     dpi_ = GetDpiForWindow(hwnd_);
     if (dpi_ == 0) dpi_ = 96;
     painter_.setDpi(dpi_);
+}
+
+void MainWindow::refreshCache() {
+    cached_ = model_.state();
+    cachedPings_ = model_.pings();
+    cachedRefreshing_ = model_.refreshing();
+    cachedPinging_ = model_.pinging();
+    hasCachedServer_ = model_.pickServer(cachedServer_);
+    // это лазит в реестр, каждый кадр туда ходить незачем
+    cachedAutostart_ = autostart::enabled();
+}
+
+ViewContext MainWindow::makeContext() {
+    return ViewContext{
+        painter_, ui_,
+        cached_, cachedPings_, cachedRefreshing_, apps_, logLines_, vpnError_, appSearch_, stats_,
+        hasCachedServer_ ? &cachedServer_ : nullptr,
+        &editRect_,
+        vpn_,
+        cachedPinging_,
+        model_.needReconnect(),
+        cachedAutostart_,
+        editTarget_ == EditTarget::Add,
+        editTarget_ == EditTarget::Domain,
+        scroll(), angle_, glow_
+    };
 }
 
 void MainWindow::say(const std::string& message) {
@@ -267,6 +294,7 @@ LRESULT MainWindow::onMessage(UINT msg, WPARAM w, LPARAM l) {
     }
 
     case WM_VINYL_MODEL: {
+        refreshCache();
         InvalidateRect(hwnd_, nullptr, FALSE);
         return 0;
     }
@@ -354,6 +382,8 @@ LRESULT MainWindow::onMessage(UINT msg, WPARAM w, LPARAM l) {
         return 0;
 
     case WM_DESTROY:
+        // сначала фоновые задачи: они дергают окно, и доработать после его смерти им нельзя
+        model_.stop();
         stats_.stop();
         core_.stop();
         KillTimer(hwnd_, kTickTimer);
@@ -398,11 +428,12 @@ void MainWindow::render() {
     drawSidebar(size);
 
     D2D1_RECT_F area = contentArea(size);
+    ViewContext context = makeContext();
     switch (tab_) {
-    case Tab::Home:     drawHome(area); break;
-    case Tab::Servers:  drawServers(area); break;
-    case Tab::Routes:   drawRoutes(area); break;
-    case Tab::Settings: drawSettings(area); break;
+    case Tab::Home:     contentHeight_ = homeView_.draw(context, area); break;
+    case Tab::Servers:  contentHeight_ = serversView_.draw(context, area); break;
+    case Tab::Routes:   contentHeight_ = routesView_.draw(context, area); break;
+    case Tab::Settings: contentHeight_ = settingsView_.draw(context, area); break;
     }
 
     drawChrome(size);
@@ -478,7 +509,7 @@ void MainWindow::drawSidebar(D2D1_SIZE_F size) {
 
     float bottom = size.height - painter_.dp(58.f);
     painter_.circle(D2D1::Point2F(painter_.dp(26.f), bottom + painter_.dp(9.f)), painter_.dp(4.f), dot);
-    painter_.text(statusText(), Font::LabelMedium,
+    painter_.text(statusText(vpn_), Font::LabelMedium,
                   D2D1::RectF(painter_.dp(38.f), bottom, width, bottom + painter_.dp(18.f)),
                   dot, Align::Left, VAlign::Middle);
     painter_.text(L"claustrophobDev", Font::LabelMedium,
@@ -506,16 +537,6 @@ void MainWindow::drawToast(D2D1_SIZE_F size) {
     painter_.text(message, Font::BodyLarge, r, theme::text, Align::Center, VAlign::Middle);
 }
 
-std::wstring MainWindow::statusText() const {
-    switch (vpn_) {
-    case VpnState::Stopped:  return L"Не подключено";
-    case VpnState::Starting: return L"Подключение";
-    case VpnState::Running:  return L"Подключено";
-    case VpnState::Error:    return L"Не удалось подключиться";
-    }
-    return L"Не подключено";
-}
-
 // --- впн ---
 
 void MainWindow::toggleVpn() {
@@ -525,6 +546,7 @@ void MainWindow::toggleVpn() {
     }
     Server server;
     if (!model_.pickServer(server)) {
+        refreshCache();
         say("Сначала добавьте сервер");
         setTab(Tab::Servers);
         return;
@@ -794,7 +816,7 @@ void MainWindow::updateTrayTip() {
     nid.hWnd = hwnd_;
     nid.uID = kTrayId;
     nid.uFlags = NIF_TIP;
-    std::wstring tip = L"Vinyl — " + statusText();
+    std::wstring tip = L"Vinyl — " + statusText(vpn_);
     wcsncpy_s(nid.szTip, tip.c_str(), _TRUNCATE);
     Shell_NotifyIconW(NIM_MODIFY, &nid);
 }

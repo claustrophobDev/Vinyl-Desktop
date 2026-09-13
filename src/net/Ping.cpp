@@ -74,7 +74,8 @@ int tcp(const std::string& host, int port, int timeoutMs) {
     return result;
 }
 
-void all(const std::vector<Server>& servers, const std::function<void(std::string, int)>& onResult) {
+void all(const std::vector<Server>& servers, const std::function<void(std::string, int)>& onResult,
+         const std::atomic<bool>* cancel) {
     std::atomic<size_t> next{ 0 };
     unsigned threads = 16;
     if (servers.size() < threads) threads = (unsigned)servers.size();
@@ -84,6 +85,7 @@ void all(const std::vector<Server>& servers, const std::function<void(std::strin
     for (unsigned i = 0; i < threads; i++) {
         workers.emplace_back([&] {
             for (;;) {
+                if (cancel != nullptr && cancel->load()) return;
                 size_t index = next.fetch_add(1);
                 if (index >= servers.size()) return;
                 const Server& server = servers[index];

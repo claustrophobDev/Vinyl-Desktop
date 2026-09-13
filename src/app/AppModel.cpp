@@ -44,6 +44,52 @@ bool looksLikeSubscription(const std::string& line) {
 
 } // namespace
 
+AppModel::AppModel() {
+    worker_ = std::thread(&AppModel::worker, this);
+}
+
+AppModel::~AppModel() {
+    stop();
+}
+
+void AppModel::stop() {
+    if (stopping_.exchange(true)) return;
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        queue_.clear();
+    }
+    queueReady_.notify_all();
+    if (worker_.joinable()) worker_.join();
+
+    // поток встал, значит никто больше не позовет колбеки, можно спокойно их убрать
+    std::lock_guard<std::mutex> lock(mutex_);
+    onChanged_ = nullptr;
+    onMessage_ = nullptr;
+}
+
+void AppModel::post(std::function<void()> job) {
+    if (stopping_.load()) return;
+    {
+        std::lock_guard<std::mutex> lock(queueMutex_);
+        queue_.push_back(std::move(job));
+    }
+    queueReady_.notify_one();
+}
+
+void AppModel::worker() {
+    for (;;) {
+        std::function<void()> job;
+        {
+            std::unique_lock<std::mutex> lock(queueMutex_);
+            queueReady_.wait(lock, [this] { return stopping_.load() || !queue_.empty(); });
+            if (stopping_.load()) return;
+            job = std::move(queue_.front());
+            queue_.pop_front();
+        }
+        job();
+    }
+}
+
 void AppModel::load() {
     std::lock_guard<std::mutex> lock(mutex_);
     state_ = Storage::load();
@@ -247,7 +293,7 @@ void AppModel::refresh(const std::string& subId) {
     }
     changed();
 
-    std::thread([this, subId, url] {
+    post([this, subId, url] {
         http::Response response = http::get(url);
 
         std::string message;
@@ -293,7 +339,7 @@ void AppModel::refresh(const std::string& subId) {
         applog::line("подписка обновлена: " + message);
         say(message);
         changed();
-    }).detach();
+    });
 }
 
 void AppModel::refreshAll() {
@@ -357,20 +403,20 @@ void AppModel::pingAll() {
     }
     changed();
 
-    std::thread([this, servers] {
+    post([this, servers] {
         ping::all(servers, [this](std::string id, int ms) {
             {
                 std::lock_guard<std::mutex> lock(mutex_);
                 pings_[id] = ms;
             }
             changed();
-        });
+        }, &stopping_);
         {
             std::lock_guard<std::mutex> lock(mutex_);
             pinging_ = false;
         }
         changed();
-    }).detach();
+    });
 }
 
 void AppModel::setNeedReconnect(bool on) {

@@ -1,10 +1,9 @@
-// Утилита для отладки: гоняет ссылки через парсер, складывает готовые конфиги в файлы
-// и потом их можно скормить sing-box check. В релиз не идет.
-//
-//     vinyl_check <папка куда сложить конфиги>
+// гоняет ссылки через парсер и складывает конфиги в файлы, дальше их жует sing-box check
 
 #include <cstdio>
 #include <fstream>
+#include <map>
+#include <mutex>
 #include <string>
 #include <vector>
 
@@ -13,6 +12,7 @@
 #include "core/SingBoxConfig.h"
 #include "data/Models.h"
 #include "net/Http.h"
+#include "net/Ping.h"
 
 namespace {
 
@@ -129,13 +129,37 @@ static int checkSubscription(const std::string& url) {
 
     std::vector<Server> servers = LinkParser::parseSubscription(response.body, "test");
     printf("  разобрано серверов: %zu\n", servers.size());
-    size_t show = servers.size() < 5 ? servers.size() : 5;
-    for (size_t i = 0; i < show; i++) {
-        const Server& s = servers[i];
-        printf("    %s %-28s %-12s %s:%d\n", s.flag.c_str(), s.name.c_str(),
-               protocolLabel(s.protocol), s.host.c_str(), s.port);
+    if (servers.empty()) return 1;
+
+    size_t bad = 0;
+    for (const Server& s : servers) {
+        if (!s.unsupported.empty()) bad++;
     }
-    return servers.empty() ? 1 : 0;
+    printf("  из них ядру не по зубам: %zu\n", bad);
+
+    // пингуем первые несколько, заодно проверяем что сам пинг работает
+    size_t show = servers.size() < 8 ? servers.size() : 8;
+    std::vector<Server> sample(servers.begin(), servers.begin() + show);
+
+    std::mutex guard;
+    std::map<std::string, int> results;
+    printf("\n  пинг первых %zu:\n", show);
+    ping::all(sample, [&](std::string id, int ms) {
+        std::lock_guard<std::mutex> lock(guard);
+        results[id] = ms;
+    });
+
+    for (const Server& s : sample) {
+        std::string ms = "нет ответа";
+        auto it = results.find(s.id);
+        if (it != results.end()) {
+            if (it->second == ping::kUdp) ms = "udp";
+            else if (it->second > 0) ms = std::to_string(it->second) + " мс";
+        }
+        printf("    %s %-30s %-12s %-24s %s\n", s.flag.c_str(), s.name.c_str(),
+               protocolLabel(s.protocol), (s.host + ":" + std::to_string(s.port)).c_str(), ms.c_str());
+    }
+    return 0;
 }
 
 int main(int argc, char** argv) {

@@ -35,6 +35,8 @@ private:
     void setState(VpnState state, const std::string& message);
     void watch();
     void closeProcess();
+    // просит ядро закрыться самостоятельно, false если не получилось даже попросить
+    bool askToStop();
 
     std::atomic<VpnState> state_{ VpnState::Stopped };
 

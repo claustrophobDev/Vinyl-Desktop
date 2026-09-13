@@ -1,10 +1,14 @@
 #pragma once
 
+#include <atomic>
+#include <condition_variable>
+#include <deque>
 #include <functional>
 #include <map>
 #include <mutex>
 #include <set>
 #include <string>
+#include <thread>
 #include <vector>
 
 #include "data/Models.h"
@@ -13,6 +17,15 @@
 // тяжелое (сеть, пинг) уходит в отдельные потоки, наружу дергается onChanged
 class AppModel {
 public:
+    AppModel();
+    ~AppModel();
+
+    AppModel(const AppModel&) = delete;
+    AppModel& operator=(const AppModel&) = delete;
+
+    // звать пока окно еще живо: колбеки держат на него указатель
+    void stop();
+
     void load();
     // зовется из любого потока, окно просто шлет себе сообщение и перерисовывается
     void onChanged(std::function<void()> callback);
@@ -56,6 +69,10 @@ public:
     void setNeedReconnect(bool on);
 
 private:
+    // вся фоновая работа через одну очередь и один поток, его join-им в stop()
+    void post(std::function<void()> job);
+    void worker();
+
     void changed();
     void say(const std::string& message);
     void saveLocked();
@@ -71,4 +88,10 @@ private:
 
     std::function<void()> onChanged_;
     std::function<void(const std::string&)> onMessage_;
+
+    std::thread worker_;
+    std::mutex queueMutex_;
+    std::condition_variable queueReady_;
+    std::deque<std::function<void()>> queue_;
+    std::atomic<bool> stopping_{ false };
 };

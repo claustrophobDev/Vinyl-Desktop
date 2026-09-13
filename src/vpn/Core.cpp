@@ -105,7 +105,8 @@ bool VpnCore::start(const Server& server, const Routing& routing, const Settings
 
     STARTUPINFOW si = {};
     si.cb = sizeof(si);
-    si.dwFlags = STARTF_USESTDHANDLES;
+    si.dwFlags = STARTF_USESTDHANDLES | STARTF_USESHOWWINDOW;
+    si.wShowWindow = SW_HIDE;
     si.hStdOutput = logFile_;
     si.hStdError = logFile_;
     si.hStdInput = nullptr;
@@ -114,8 +115,11 @@ bool VpnCore::start(const Server& server, const Routing& routing, const Settings
     std::vector<wchar_t> mutableLine(commandLine.begin(), commandLine.end());
     mutableLine.push_back(L'\0');
 
+    // консоль скрытая, она нужна только чтобы потом послать ctrl+break.
+    // группа своя, иначе это событие прилетит и нам
     BOOL ok = CreateProcessW(exe.c_str(), mutableLine.data(), nullptr, nullptr, TRUE,
-                             CREATE_NO_WINDOW | CREATE_SUSPENDED, nullptr, workDir.c_str(), &si, &pi);
+                             CREATE_NEW_CONSOLE | CREATE_NEW_PROCESS_GROUP | CREATE_SUSPENDED,
+                             nullptr, workDir.c_str(), &si, &pi);
     if (!ok) {
         DWORD code = GetLastError();
         applog::line("не запустился sing-box, ошибка " + std::to_string(code));
@@ -158,12 +162,35 @@ void VpnCore::watch() {
     setState(VpnState::Error, "Ядро остановилось само, смотри data\\core.log");
 }
 
+bool VpnCore::askToStop() {
+    if (!process_) return false;
+    DWORD pid = GetProcessId(process_);
+    if (pid == 0) return false;
+
+    // на время отправки глушим свой обработчик, иначе выключимся сами
+    FreeConsole();
+    if (!AttachConsole(pid)) return false;
+
+    SetConsoleCtrlHandler(nullptr, TRUE);
+    bool sent = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0) != 0;
+    FreeConsole();
+    SetConsoleCtrlHandler(nullptr, FALSE);
+    return sent;
+}
+
 void VpnCore::stop() {
     stopping_.store(true);
 
     if (process_) {
-        TerminateProcess(process_, 0);
-        WaitForSingleObject(process_, 3000);
+        // сначала по-хорошему, иначе в системе остается мертвый адаптер
+        bool asked = askToStop();
+        if (asked && WaitForSingleObject(process_, 5000) == WAIT_OBJECT_0) {
+            applog::line("ядро закрылось само");
+        } else {
+            applog::line(asked ? "ядро не закрылось за 5 секунд, прибиваем" : "ядро прибиваем сразу");
+            TerminateProcess(process_, 0);
+            WaitForSingleObject(process_, 3000);
+        }
     }
     if (watcher_.joinable()) watcher_.join();
 

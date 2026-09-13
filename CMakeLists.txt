@@ -63,19 +63,18 @@ configure_file(res/app.manifest.in ${CMAKE_CURRENT_BINARY_DIR}/app.manifest @ONL
 
 add_executable(vinyl WIN32
     src/main.cpp
+    src/ui/FlagPainter.cpp
     src/ui/MainWindow.cpp
     src/ui/Painter.cpp
-    src/ui/Screens.cpp
     src/ui/Widgets.cpp
+    src/ui/views/HomeView.cpp
+    src/ui/views/RoutesView.cpp
+    src/ui/views/ServersView.cpp
+    src/ui/views/SettingsView.cpp
     res/app.rc
 )
 
-# Уровень прав задан в своем манифесте (res/app.manifest.in), и он должен быть единственным.
-# Линковщик по умолчанию подмешивает еще и свой кусок с level='asInvoker'. Пока мы сами просили
-# asInvoker, куски совпадали и все собиралось, а на requireAdministrator mt.exe падал с
-# c1010001 "Values of attribute level not equal". /MANIFESTUAC:NO выключает кусок от линковщика.
-# Писать уровень прямо в /MANIFESTUAC нельзя: cmake -E vs_link_exe корежит кавычки внутри
-# аргумента и получается битый xml (c1010070).
+# MANIFESTUAC:NO обязателен, иначе линковщик добавит свой asInvoker и mt.exe упадет с c1010001
 target_link_options(vinyl PRIVATE
     "/MANIFEST:EMBED"
     "/MANIFESTINPUT:${CMAKE_CURRENT_BINARY_DIR}/app.manifest"
@@ -103,3 +102,9 @@ target_link_libraries(vinyl_uninstall PRIVATE vinyl_core)
 # проверялка конфигов, рядом с релизом не нужна
 add_executable(vinyl_check tests/CheckConfig.cpp)
 target_link_libraries(vinyl_check PRIVATE vinyl_core)
+
+# тесты на логику: ctest или просто запустить exe
+enable_testing()
+add_executable(vinyl_tests tests/UnitTests.cpp)
+target_link_libraries(vinyl_tests PRIVATE vinyl_core)
+add_test(NAME logic COMMAND vinyl_tests)

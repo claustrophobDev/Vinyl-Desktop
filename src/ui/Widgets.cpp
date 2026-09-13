@@ -1,6 +1,8 @@
 #include "ui/Widgets.h"
 
+#include "core/Flags.h"
 #include "net/Ping.h"
+#include "ui/FlagPainter.h"
 #include "ui/Theme.h"
 
 void Ui::zone(D2D1_RECT_F r, int id) {
@@ -155,14 +157,28 @@ void iconTile(Ui& ui, D2D1_RECT_F r, const wchar_t* icon, const D2D1_COLOR_F& ti
 
 void flagAvatar(Ui& ui, D2D1_POINT_2F center, float radius, const std::string& flag, bool dimmed) {
     Painter& p = *ui.p;
-    p.circle(center, radius, theme::surfaceHigh);
+    // пропорции примерно как у настоящего флага, 3 к 2
+    float half = radius * 1.42f;
+    D2D1_RECT_F box = D2D1::RectF(center.x - half, center.y - radius * 0.95f,
+                                  center.x + half, center.y + radius * 0.95f);
+
     if (dimmed) {
-        p.text(L"\xE774", Font::Icon,
-               D2D1::RectF(center.x - radius, center.y - radius, center.x + radius, center.y + radius),
-               theme::textMuted, Align::Center, VAlign::Middle);
+        p.round(box, p.dp(4.f), theme::surfaceHigh);
+        p.text(L"\xE774", Font::Icon, box, theme::textMuted, Align::Center, VAlign::Middle);
         return;
     }
-    p.emoji(flag, center, radius * 0.95f);
+
+    std::string code = Flags::codeOf(flag);
+    if (!code.empty() && flags::draw(p, box, code)) {
+        // рамка нужна, иначе белые флаги сливаются с карточкой
+        p.roundBorder(box, 0.f, theme::strokeStrong());
+        return;
+    }
+
+    p.round(box, p.dp(4.f), theme::surfaceHigh);
+    std::wstring letters(code.begin(), code.end());
+    p.text(letters.empty() ? L"?" : letters, Font::LabelMedium, box,
+           theme::textSecond, Align::Center, VAlign::Middle);
 }
 
 namespace {
