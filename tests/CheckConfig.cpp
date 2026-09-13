@@ -7,12 +7,18 @@
 #include <string>
 #include <vector>
 
+#include <windows.h>
+
+#include "app/Log.h"
+#include "app/Paths.h"
 #include "core/Errors.h"
 #include "core/LinkParser.h"
 #include "core/SingBoxConfig.h"
 #include "data/Models.h"
 #include "net/Http.h"
 #include "net/Ping.h"
+#include "vpn/Core.h"
+#include "vpn/Stats.h"
 
 namespace {
 
@@ -162,12 +168,116 @@ static int checkSubscription(const std::string& url) {
     return 0;
 }
 
+// поднимает настоящий туннель и гасит его. нужны права администратора
+static int checkVpn(const std::string& link, int seconds) {
+    paths::ensureDataDir();
+    applog::open();
+
+    Server server;
+    if (!LinkParser::toServer(link, "", server)) {
+        printf("ссылку не разобрать\n");
+        return 2;
+    }
+    if (!server.unsupported.empty()) {
+        printf("такой сервер ядро не умеет: %s\n", server.unsupported.c_str());
+        return 2;
+    }
+    printf("сервер: %s  %s:%d\n", server.name.c_str(), server.host.c_str(), server.port);
+
+    VpnCore core;
+    Routing routing;
+    Settings settings;
+
+    if (!core.start(server, routing, settings)) {
+        printf("не поднялось: %s\n", core.message().c_str());
+        return 1;
+    }
+    printf("ядро запущено, держим %d секунд\n", seconds);
+
+    TrafficStats stats;
+    stats.start();
+    for (int i = 0; i < seconds; i++) {
+        Sleep(1000);
+        if (core.state() != VpnState::Running) {
+            printf("ядро отвалилось на %d секунде: %s\n", i + 1, core.message().c_str());
+            stats.stop();
+            core.stop();
+            return 1;
+        }
+    }
+    printf("прокачано: вниз %lld, вверх %lld\n", stats.downTotal(), stats.upTotal());
+    stats.stop();
+
+    printf("останавливаем...\n");
+    ULONGLONG started = GetTickCount64();
+    core.stop();
+    printf("остановилось за %llu мс\n", GetTickCount64() - started);
+
+    applog::close();
+    return 0;
+}
+
+// проверяет только запуск и остановку ядра. tun не поднимается, маршруты системы не трогаются,
+// поэтому и права администратора не нужны
+static int checkStop() {
+    paths::ensureDataDir();
+
+    // в свежем клоне ядра рядом нет, тогда просто пропускаем тест
+    if (GetFileAttributesW(paths::coreExe().c_str()) == INVALID_FILE_ATTRIBUTES) {
+        printf("рядом нет core/sing-box.exe, пропускаем\n");
+        return 2;
+    }
+    applog::open();
+
+    std::string config =
+        R"({"log":{"level":"warn","timestamp":false},)"
+        R"("dns":{"servers":[{"type":"local","tag":"local"}],"final":"local"},)"
+        R"("inbounds":[{"type":"mixed","tag":"in","listen":"127.0.0.1","listen_port":18080}],)"
+        R"("outbounds":[{"type":"direct","tag":"direct"}],)"
+        R"("route":{"final":"direct","default_domain_resolver":"local"}})";
+
+    VpnCore core;
+    if (!core.startWithConfig(config)) {
+        printf("ядро не запустилось: %s\n", core.message().c_str());
+        return 1;
+    }
+    printf("ядро работает\n");
+    Sleep(2000);
+    if (core.state() != VpnState::Running) {
+        printf("ядро умерло само: %s\n", core.message().c_str());
+        core.stop();
+        return 1;
+    }
+
+    ULONGLONG started = GetTickCount64();
+    core.stop();
+    ULONGLONG spent = GetTickCount64() - started;
+
+    bool graceful = core.stoppedGracefully();
+    std::string verdict = "остановка заняла " + std::to_string(spent) + " мс: " +
+                          (graceful ? "закрылось само по ctrl+break" : "пришлось прибивать");
+    printf("%s\n", verdict.c_str());
+
+    // на время ctrl+break консоль отцепляется, поэтому дублируем вывод в файл
+    std::ofstream out(paths::dataDir() + L"\\stoptest.txt", std::ios::binary | std::ios::trunc);
+    out << verdict << "\n";
+
+    applog::close();
+    return graceful ? 0 : 1;
+}
+
 int main(int argc, char** argv) {
+    if (argc >= 2 && std::string(argv[1]) == "--stoptest") {
+        return checkStop();
+    }
     if (argc >= 3 && std::string(argv[1]) == "--sub") {
         return checkSubscription(argv[2]);
     }
+    if (argc >= 3 && std::string(argv[1]) == "--vpn") {
+        return checkVpn(argv[2], argc >= 4 ? atoi(argv[3]) : 8);
+    }
     if (argc < 2) {
-        printf("укажи папку куда складывать конфиги, или --sub <ссылка на подписку>\n");
+        printf("укажи папку куда складывать конфиги, --sub <подписка> или --vpn <ссылка> [секунды]\n");
         return 2;
     }
     std::string dir = argv[1];

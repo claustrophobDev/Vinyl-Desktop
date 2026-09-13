@@ -108,3 +108,8 @@ enable_testing()
 add_executable(vinyl_tests tests/UnitTests.cpp)
 target_link_libraries(vinyl_tests PRIVATE vinyl_core)
 add_test(NAME logic COMMAND vinyl_tests)
+
+# поднимает ядро на безопасном конфиге (без tun) и проверяет, что оно закрывается
+# само по ctrl+break, а не через TerminateProcess. без ядра рядом тест пропускается
+add_test(NAME core_stop COMMAND vinyl_check --stoptest)
+set_tests_properties(core_stop PROPERTIES SKIP_RETURN_CODE 2)

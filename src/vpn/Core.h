@@ -26,10 +26,14 @@ public:
     void onState(std::function<void(VpnState, const std::string&)> callback);
 
     bool start(const Server& server, const Routing& routing, const Settings& settings);
+    // запуск по готовому конфигу, отдельно чтобы можно было проверить без tun
+    bool startWithConfig(const std::string& config);
     void stop();
 
     VpnState state() const { return state_.load(); }
     std::string message() const;
+    // закрылось ли ядро само в прошлый раз, или пришлось прибивать
+    bool stoppedGracefully() const { return gracefulStop_; }
 
 private:
     void setState(VpnState state, const std::string& message);
@@ -37,6 +41,7 @@ private:
     void closeProcess();
     // просит ядро закрыться самостоятельно, false если не получилось даже попросить
     bool askToStop();
+    void releaseConsole();
 
     std::atomic<VpnState> state_{ VpnState::Stopped };
 
@@ -49,4 +54,5 @@ private:
     HANDLE logFile_ = nullptr;
     std::thread watcher_;
     std::atomic<bool> stopping_{ false };
+    bool gracefulStop_ = false;
 };

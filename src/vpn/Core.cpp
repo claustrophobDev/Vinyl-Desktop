@@ -11,6 +11,12 @@
 
 namespace {
 
+// пока шлем ctrl+break, это событие прилетает и нам. обработчик, который вернул TRUE,
+// считается отработавшим, и винда нас не закрывает
+BOOL WINAPI swallowCtrl(DWORD) {
+    return TRUE;
+}
+
 bool writeConfig(const std::string& config, std::string& error) {
     std::ofstream out(paths::configFile().c_str(), std::ios::binary | std::ios::trunc);
     if (!out) {
@@ -53,11 +59,8 @@ void VpnCore::setState(VpnState state, const std::string& message) {
 }
 
 bool VpnCore::start(const Server& server, const Routing& routing, const Settings& settings) {
-    stop();
-    stopping_.store(false);
-    setState(VpnState::Starting, "");
-
     if (!server.unsupported.empty()) {
+        stop();
         setState(VpnState::Error, server.unsupported);
         return false;
     }
@@ -67,9 +70,20 @@ bool VpnCore::start(const Server& server, const Routing& routing, const Settings
         Proxy proxy = LinkParser::toProxy(server.link);
         config = SingBoxConfig::build(proxy, routing, settings);
     } catch (const std::exception& e) {
+        stop();
         setState(VpnState::Error, e.what());
         return false;
     }
+
+    if (!startWithConfig(config)) return false;
+    applog::line("сервер " + server.host + ":" + std::to_string(server.port));
+    return true;
+}
+
+bool VpnCore::startWithConfig(const std::string& config) {
+    stop();
+    stopping_.store(false);
+    setState(VpnState::Starting, "");
 
     std::string error;
     if (!writeConfig(config, error)) {
@@ -143,7 +157,7 @@ bool VpnCore::start(const Server& server, const Routing& routing, const Settings
         return false;
     }
 
-    applog::line("ядро поднялось, сервер " + server.host + ":" + std::to_string(server.port));
+    applog::line("ядро поднялось");
     setState(VpnState::Running, "");
 
     watcher_ = std::thread(&VpnCore::watch, this);
@@ -167,15 +181,21 @@ bool VpnCore::askToStop() {
     DWORD pid = GetProcessId(process_);
     if (pid == 0) return false;
 
-    // на время отправки глушим свой обработчик, иначе выключимся сами
     FreeConsole();
     if (!AttachConsole(pid)) return false;
 
-    SetConsoleCtrlHandler(nullptr, TRUE);
-    bool sent = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, 0) != 0;
-    FreeConsole();
-    SetConsoleCtrlHandler(nullptr, FALSE);
+    // ctrl+break через nullptr не игнорируется, в отличие от ctrl+c, поэтому ставим свой
+    // обработчик. и шлем событие ровно в группу ядра, а не всем в консоли
+    SetConsoleCtrlHandler(&swallowCtrl, TRUE);
+    bool sent = GenerateConsoleCtrlEvent(CTRL_BREAK_EVENT, pid) != 0;
+    if (!sent) releaseConsole();
     return sent;
+}
+
+// консоль и обработчик отпускаем только когда ядро уже завершилось
+void VpnCore::releaseConsole() {
+    SetConsoleCtrlHandler(&swallowCtrl, FALSE);
+    FreeConsole();
 }
 
 void VpnCore::stop() {
@@ -185,12 +205,15 @@ void VpnCore::stop() {
         // сначала по-хорошему, иначе в системе остается мертвый адаптер
         bool asked = askToStop();
         if (asked && WaitForSingleObject(process_, 5000) == WAIT_OBJECT_0) {
+            gracefulStop_ = true;
             applog::line("ядро закрылось само");
         } else {
+            gracefulStop_ = false;
             applog::line(asked ? "ядро не закрылось за 5 секунд, прибиваем" : "ядро прибиваем сразу");
             TerminateProcess(process_, 0);
             WaitForSingleObject(process_, 3000);
         }
+        if (asked) releaseConsole();
     }
     if (watcher_.joinable()) watcher_.join();
 
